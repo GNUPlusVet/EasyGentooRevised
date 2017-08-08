@@ -1,0 +1,182 @@
+#!/bin/bash
+
+chmod a+x chrooted
+clear
+
+#Originally by Pascal3366
+#Revised by \/etrert and Ungentoo 
+#https://github.com/Pascal3366
+#https://github.com/GNUPlusVet
+#https://github.com/ungentoo
+#Original Script: https://github.com/Pascal3366/EasyGentoo
+
+ssh=""
+internet=""
+biosorefi=""
+root_part=""
+bios_boot_part=""
+efi_boot_part=""
+homeoption=""
+swapoption=""
+home_part=""
+swap_part=""
+systemmanager=""
+openrc_tarball_url="http://distfiles.gentoo.org/releases/amd64/autobuilds/current-stage3-amd64/stage3-amd64-20170803.tar.bz2"
+systemd_tarball_url="http://distfiles.gentoo.org/releases/amd64/autobuilds/current-stage3-amd64/systemd/stage3-amd64-systemd-20170803.tar.bz2"
+
+read -p "MAKE SURE YOU RUN THIS IN ROOT!" -n1 -s
+
+echo "Welcome to the Easy Gentoo Installer!"
+sleep 0.25
+echo "Brought to you by Pascall3366!"
+sleep 0.25
+echo "Re-Brought to you by Vetrert and Ungentoo!"
+sleep 0.25
+echo "Fuck you if you use i386. (Except Stallman, he's cool.)"
+sleep 0.25
+echo "Proprietary cucks BTFO, this is free software!"
+sleep 0.25
+echo "Feel free to fork, fork this fork, fuck, share or contribute!"
+sleep 0.25
+echo "This script needs to be run under root."
+sleep 0.25
+echo "------------------------------------"
+sleep 0.25
+echo "Getting IP address through DHCP..."
+dhcpcd
+echo "Testing Internet Access ..."
+ping -c 3 gnu.org
+echo "Is Internet Access working? (y/N)"
+read internet
+
+if [ "$internet" = "n" ]
+then
+net-setup eth0
+else
+echo ""
+fi
+
+echo "Would you like to start an SSH-Server for remote installation? (y/N)"
+read ssh
+
+if [ "$ssh" = "y" ]
+then
+/etc/init.d/sshd start
+else
+echo ""
+fi
+
+echo "Please remember to make your partitions before hand."
+echo "Partitioning"
+echo "(Please input just the block device without /dev/)"
+echo "------------------------------------"
+echo "Choose the block device for the root partition:"
+lsblk
+echo "Input:"
+read root_part
+mkfs.ext4 /dev/$root_part
+echo "Do you use BIOS or EFI?"
+echo "Please enter bios or efi."
+echo "Input: "
+read biosorefi
+    
+if [ "$biosorefi" = "bios" ]
+then
+echo "Choose the block device for the BIOS boot partition:"
+lsblk
+echo "Input:"
+read bios_boot_part
+mkfs.ext2 /dev/$bios_boot_part
+else
+echo "Choose the block device for the EFI boot partition:"
+lsblk
+echo "Input:"
+read efi_boot_part
+mkfs.fat -F 32 /dev/$efi_boot_part
+fi
+    
+echo "Would you like a home partition? (y/N)" 
+read homeoption
+    
+if [ "$homeoption" = "y" ]
+then
+echo "Choose the block device for the home partition:"
+lsblk
+echo "Input:"
+read home_part
+mkfs.ext4 /dev/$home_part
+else
+echo ""
+fi
+    
+echo "Would you like a swap partition? (y/N)"
+read swapoption
+    
+if [ "$swapoption" = "y" ]
+then
+echo "Choose the block device for the swap partition:"
+lsblk
+echo "Input:"
+read swap_part
+mkswap /dev/$swap_part
+swapon /dev/$swap_part
+else
+echo ""
+fi
+
+echo "Mounting the partitions..."
+mount /dev/$root_part /mnt/gentoo
+mkdir /mnt/gentoo/boot
+mkdir /mnt/gentoo/home
+    
+if [ "$biosorefi" = "efi" ]
+then
+mkdir /mnt/gentoo/boot/efi
+mount /dev/$efi_boot_part /mnt/gentoo/boot
+else
+mount /dev/$bios_boot_part /mnt/gentoo/boot
+fi
+
+if [ "$homeoption" = "y" ]
+then
+mount /dev/$home_part /mnt/gentoo/home
+else
+echo ""
+fi
+    
+echo "Getting the stage3 tarball..."
+cd /mnt/gentoo
+echo "Would you like to install Gentoo with OpenRC (default) or systemd?"
+echo "Please enter either openrc or systemd"
+echo "Input:"
+read systemmanager
+
+if [ "$systemmanager" = "systemd" ]
+then
+wget $systemd_tarball_url
+echo "Successfully selected systemd!"
+else
+wget $openrc_tarball_url
+echo "Successfully selected OpenRC!"
+fi
+
+tar xvjpf stage3-*.tar.bz2 --xattrs --numeric-owner
+cp -r /home/gentoo/EasyGentooRevised/chrooted /mnt/gentoo
+read -p "Press any key to edit your make.conf." -n1 -s
+nano -w /mnt/gentoo/etc/portage/make.conf
+echo "Selecting the best mirror..."
+mirrorselect -i -o >> /mnt/gentoo/etc/portage/make.conf
+echo "Creating portage repos ..."
+mkdir /mnt/gentoo/etc/portage/repos.conf
+cp /mnt/gentoo/usr/share/portage/config/repos.conf /mnt/gentoo/etc/portage/repos.conf/gentoo.conf
+echo "Saving DNS Info to installation..."
+cp -L /etc/resolv.conf /mnt/gentoo/etc/
+echo "Mounting all neccessary filesystems for chrooting ..."
+mount -t proc /proc /mnt/gentoo/proc
+mount --rbind /sys /mnt/gentoo/sys
+mount --make-rslave /mnt/gentoo/sys
+mount --rbind /dev /mnt/gentoo/dev
+mount --make-rslave /mnt/gentoo/dev
+echo "Getting into the created root partition..."
+echo "Please run sh chrooted once you're chrooted.."
+chroot /mnt/gentoo /bin/bash

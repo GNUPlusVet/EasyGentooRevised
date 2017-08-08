@@ -1,0 +1,330 @@
+#!/bin/bash
+
+#Originally by Pascal3366
+#Revised by \/etrert and Ungentoo 
+#https://github.com/Pascal3366
+#https://github.com/GNUPlusVet
+#https://github.com/ungentoo
+#Original Script: https://github.com/Pascal3366/EasyGentoo
+
+openrc_systemd=""
+profile_no=""
+timezone=""
+locale=
+interface=""
+pcmcia=""
+cron_support=""
+file_indexing=""
+install_ssh=""
+bios_efi=""
+grub_part=""
+username=""
+delete_tarball=""
+xdguserdirs=""
+gentoolkit=""
+sudoinstall=""
+eixinstall=""
+reboot=""
+
+source /etc/profile
+export PS1="(chroot) $PS1"
+echo "Fetching the latest portage snapshot..."
+emerge-webrsync
+echo "Updating the whole portage tree... This may take some time, please be patient..."
+emerge --sync --quiet
+echo "Done."
+echo "Please select a system profile for your installation."
+eselect profile list
+echo "Profile No.:"
+read profile_no
+eselect profile set $profile_no
+echo "Now we need to emerge the whole world set..."
+emerge --ask --update --deep --newuse @world
+echo "Done."
+echo "At this point you need to configure your USE flags..."
+echo "Your system should work with the following USE flags:"
+emerge --info | grep ^USE
+read -p "Press any key to edit your make.conf and set your USE flags..." -n1 -s
+nano -w /etc/portage/make.conf
+echo "Now setting timezone settings..."
+ls /usr/share/zoneinfo
+echo "Select Timezone"
+echo "List timezones:"
+read timezone
+ls /usr/share/zoneinfo/$timezone
+echo "Select timezone, make sure to type MainTimezoneFolder/TimezoneFile, or else..."
+read timezone2
+echo $timezone2 >> /etc/timezone
+emerge --config sys-libs/timezone-data
+echo "Configuring locales ..."
+read -p "Press any key to edit your locale settings. Uncomment all of your wanted language entries."
+nano -w /etc/locale.gen
+locale-gen
+echo "Now you will need to set the locale settings system-wide."
+read -p "Press any key to show the locale list and set your locale number." -n1 -s
+eselect locale list
+echo "Locale:"
+read locale
+eselect locale set $locale
+echo "Reloading environment..."
+env-update && source /etc/profile && export PS1="(chroot) $PS1"
+echo "Building initramfs..."
+emerge sys-kernel/genkernel
+genkernel --install initramfs
+genkernel --lvm --mdadm --install initramfs
+ls /boot/initramfs*
+echo "Done."
+echo "Compiling and installing the kernel..."
+echo "Please configure fstab to continue."
+echo "Here are your partitons, write down the details of them:"
+lsblk
+blkid
+read -p "Press any key to edit your fstab file, this is neccessary." -n1 -s
+nano -w /etc/fstab
+ls /boot/kernel* /boot/initramfs
+echo "Done."
+echo "Now downloading & compiling the kernel... Please be patient."
+emerge sys-kernel/gentoo-sources
+genkernel all
+echo "Configuring Kernel Modules:"
+find /lib/modules/4.*/ -type f -iname '*.o' -or -iname '*.ko' | less
+read -p "Press any key to edit your modules conf and submit the modules you need." -n1 -s
+nano -w /etc/conf.d/modules
+echo "Now installing the linux-firmware..."
+emerge --ask sys-kernel/linux-firmware
+read -p "Press any key to set your hostname." -n1 -s
+nano -w /etc/conf.d/hostname
+touch /etc/conf.d/net
+echo 'dns_domain_lo="homenetwork"' >> /etc/conf.d/net
+echo "Press any key to set your domain name."
+nano -w /etc/conf.d/net
+echo "Now configuring the network."
+emerge --noreplace net-misc/netifrc
+ifconfig
+echo "Again, edit the net file but this time enter DHCP if using DHCP or an IP for static IP."
+echo "For the field ´config_eth0=´"
+echo "Or any other of your used LAN/WIFI interfaces."
+read -p "Press any key to edit this file..." -n1 -s
+nano -w /etc/conf.d/net
+echo "Please specify your main LAN/WIFI interface :"
+echo "Interface:"
+read interface
+echo "Enabling interface at boot."
+ln -s /etc/init.d/net.lo net.$interface
+
+echo "Did you choose OpenRC or systemd?"
+echo "Please enter either openrc or systemd."
+read openrc_systemd
+
+if [ "$openrc_systemd" = "openrc" ]
+then
+rc-update add net.$interface default
+else
+systemctl enable net.$interface
+fi
+
+echo "Done."
+echo "Now Configuring your hosts file. (this is optional)"
+read -p "Press any key to edit your Hosts file." -n1 -s
+nano -w /etc/hosts
+echo "Are you using a PCMCIA card? (y/N)"
+read pcmcia
+
+if [ "$pcmcia" = "y" ]
+then
+emerge --ask sys-apps/pcmciautils
+else
+echo ""
+fi
+
+echo "Now setting the root password."
+passwd
+
+if [ "$openrc_systemd" = "openrc" ]
+then
+echo "Now review the rc.conf file and make changes if neccessary for booting. (If you chose systemd rather than OpenRC, you do not need to do this step.)"
+read -p "Press any key to do this..." -n1 -s
+nano -w /etc/rc.conf
+else
+echo ""
+fi
+
+echo "Now the file to specify the keyboard layout to use..."
+read -p "Press any key to do this..." -n1 -s
+nano -w /etc/conf.d/keymaps
+echo "Finally edit the settings for the hardware clock..."
+read -p "Press any key to do this..." -n1 -s
+nano -w /etc/conf.d/hwclock
+echo "Installing the System Logger package..."
+emerge --ask app-admin/sysklogd
+
+if [ "$openrc_systemd" = "openrc" ]
+then
+rc-update add sysklogd default
+else
+systemctl enable sysklogd
+fi
+
+echo "Would you like to install a cronjob daemon? (y/N)"
+read cron_support
+
+if [ "$cron_support" = "y" ]
+then
+if [ "$openrc_systemd" = "openrc" ]
+then
+emerge --ask sys-process/cronie
+rc-update add cronie default
+crontab /etc/crontab
+else
+emerge --ask sys-process/cronie
+systemctl enable cronie
+crontab /etc/crontab
+fi
+else
+echo ""
+fi
+
+echo "Would you like to enable file indexing? (y/N)"
+read file_indexing
+
+if [ "$file_indexing" = "y" ]
+then
+emerge --ask sys-apps/mlocate
+else
+echo ""
+fi
+
+echo "Would you like to install the SSH-Server? (y/N)"
+read install_ssh
+
+if [ "$install_ssh" = "y" ]
+then
+emerge --ask --changed-use net-misc/openssh
+/usr/bin/ssh-keygen -t dsa -f /etc/ssh/ssh_host_dsa_key -N ""
+/usr/bin/ssh-keygen -t rsa -f /etc/ssh/ssh_host_rsa_key -N ""
+nano -w /etc/ssh/sshd_config
+if [ "$openrc_systemd" = "openrc" ]
+then
+rc-update add sshd default
+rc-service sshd start
+else
+systemctl enable sshd
+systemctl start sshd
+fi
+else
+echo ""
+fi
+
+echo "Installing additional filesystem tools..."
+emerge --ask sys-fs/e2fsprogs
+emerge --ask sys-fs/dosfstools
+echo "Installing DHCP Service ..."
+emerge --ask net-misc/dhcpcd
+echo "Now installing the bootloader."
+echo "We will use GRUB2."
+echo "Are you using BIOS or EFI?"
+echo "Please enter either bios or efi."
+echo "Input:"
+read bios_efi
+
+if [ "$bios_efi" = "efi" ]
+then
+echo 'GRUB_PLATFORMS="efi-64"' >> /etc/portage/make.conf
+else
+echo ""
+fi
+
+echo "Now Installing GRUB2..."
+emerge --ask --verbose sys-boot/grub:2
+
+if [ "$bios_efi" = "bios" ]
+then
+echo "And specify your partition to install GRUB on..."
+echo "(This must be your root disk, do NOT enter /dev/, for example: sda1)"
+lsblk
+read grub_part
+grub-install /dev/$grub_part
+else
+grub-install --target=x86_64-efi --efi-directory=/boot
+fi
+
+echo "Generating grub.cfg..."
+grub-mkconfig -o /boot/grub/grub.cfg
+echo "Done."
+echo "Congratulations! The Basic Installation Is now finished!"
+echo "Now coming to the Post Installation Part..."
+echo "Creating a new User account..."
+echo "Username: "
+read username
+useradd -m -G users,wheel,audio -s /bin/bash $username
+passwd $username
+echo "Would you like to delete the downloaded tarball package?"
+echo "It is not needed anymore and can be safely delet. (y/N)"
+read delete_tarball
+
+if [ "$delete_tarball" = "y" ]
+then
+rm /stage3-*.tar.bz2*
+else
+echo ""
+fi
+
+echo "Would you like to install xdg-user-dirs (y/N)?"
+read xdguserdirs
+
+if [ "$xdguserdirs" = "y" ]
+then
+emerge --ask x11-misc/xdg-user-dirs
+else
+echo ""
+fi
+
+echo "Would you like to install Gentoolkit? (y/N)"
+read gentoolkit
+
+if [ "$gentoolkit" = "y" ]
+then
+emerge --ask app-portage/gentoolkit
+else
+echo ""
+fi
+
+echo "Would you like to install sudo? (y/N)"
+read sudoinstall
+
+if [ "$sudoinstall" = "y" ]
+then
+emerge --ask app-admin/sudo
+else
+echo ""
+fi
+
+echo "Would you like to install eix? (y/N)"
+read eixinstall
+
+if [ "$eixinstall" = "y" ]
+then
+emerge --ask app-portage/eix
+else
+echo ""
+fi
+
+echo "Please note: It is recommended to do eix-sync -v, emerge -uvDNa --with-bdeps=y world and etc-update after reboot."
+echo "Would you like to reboot? (y/N)"
+read reboot
+
+if [ "$reboot" = "y" ]
+then
+echo "Run these commands:"
+sleep 0.10
+echo "cd"
+sleep 0.10
+echo "sudo umount -l /mnt/gentoo/dev{/shm,/pts,}"
+sleep 0.10
+echo "sudo umount -R /mnt/gentoo"
+sleep 0.10
+echo "reboot"
+exit
+else
+echo ""
+fi
